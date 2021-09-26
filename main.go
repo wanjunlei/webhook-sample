@@ -32,12 +32,14 @@ import (
 )
 
 var (
+	tls      bool
 	cn       string
 	user     string
 	password string
 )
 
 func AddFlags(fs *pflag.FlagSet) {
+	fs.BoolVar(&tls, "tls", false, "use https")
 	fs.StringVar(&cn, "cn", "", "Common name")
 	fs.StringVar(&user, "user", "admin", "user name")
 }
@@ -80,37 +82,11 @@ func Run() error {
 	fmt.Printf("Password: %s\n", password)
 	fmt.Printf("Token: %s\n", token)
 
-	go httpsServer()
-
-	return httpServer()
-}
-
-func httpServer() error {
-	container := restful.NewContainer()
-	ws := new(restful.WebService)
-	ws.Path("").
-		Consumes(restful.MIME_JSON).
-		Produces(restful.MIME_JSON)
-	ws.Route(ws.POST("/notifications").To(handler))
-	ws.Route(ws.GET("/readiness").To(readiness))
-	ws.Route(ws.GET("/liveness").To(readiness))
-	ws.Route(ws.GET("/preStop").To(preStop))
-
-	container.Add(ws)
-
-	server := &http.Server{
-		Addr:    ":8080",
-		Handler: container,
-	}
-
-	if err := server.ListenAndServe(); err != nil {
-		glog.Fatal(err)
-	}
-
+	server()
 	return nil
 }
 
-func httpsServer() {
+func server() {
 	container := restful.NewContainer()
 	ws := new(restful.WebService)
 	ws.Path("").
@@ -123,41 +99,54 @@ func httpsServer() {
 
 	container.Add(ws)
 
-	if cn == "" {
-		cn = "webhook-sample"
-	}
-	_, serverKey, serverCrt, err := CreateCa(cn)
-	if err != nil {
-		glog.Fatal(err)
+	if tls {
+		if cn == "" {
+			cn = "webhook-sample"
+		}
+		_, serverKey, serverCrt, err := CreateCa(cn)
+		if err != nil {
+			glog.Fatal(err)
+		}
+
+		file, err := os.Create("tls.key")
+		if err != nil {
+			glog.Fatal(err)
+		}
+
+		_, err = file.Write(serverKey)
+		if err != nil {
+			glog.Fatal(err)
+		}
+
+		file, err = os.Create("tls.crt")
+		if err != nil {
+			glog.Fatal(err)
+		}
+
+		_, err = file.Write(serverCrt)
+		if err != nil {
+			glog.Fatal(err)
+		}
 	}
 
-	file, err := os.Create("tls.key")
-	if err != nil {
-		glog.Fatal(err)
-	}
+	if tls {
+		server := &http.Server{
+			Addr:    ":443",
+			Handler: container,
+		}
 
-	_, err = file.Write(serverKey)
-	if err != nil {
-		glog.Fatal(err)
-	}
+		if err := server.ListenAndServeTLS("tls.crt", "tls.key"); err != nil {
+			glog.Fatal(err)
+		}
+	} else {
+		server := &http.Server{
+			Addr:    ":8080",
+			Handler: container,
+		}
 
-	file, err = os.Create("tls.crt")
-	if err != nil {
-		glog.Fatal(err)
-	}
-
-	_, err = file.Write(serverCrt)
-	if err != nil {
-		glog.Fatal(err)
-	}
-
-	server := &http.Server{
-		Addr:    ":443",
-		Handler: container,
-	}
-
-	if err := server.ListenAndServeTLS("tls.crt", "tls.key"); err != nil {
-		glog.Fatal(err)
+		if err := server.ListenAndServe(); err != nil {
+			glog.Fatal(err)
+		}
 	}
 
 	return

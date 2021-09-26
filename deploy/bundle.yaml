@@ -58,12 +58,15 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: notification-adapter
+  name: webhook-sample
   namespace: kubesphere-monitoring-system
 spec:
   selector:
-    name: notification-adapter
+    name: webhook-sample
   ports:
     - name: http
       port: 8080
+      targetPort: 8080
+    - name: https
+      port: 443
       targetPort: 8080
